@@ -280,12 +280,22 @@ function formatTransaction(tx) {
     const coinSymbol = coinParts[coinParts.length - 1] || 'UNKNOWN';
     const decimals = getCoinDecimals(coinSymbol);
 
+    // Extract owner address safely - only return strings
+    let ownerAddress = null;
+    if (change.owner?.AddressOwner) {
+      ownerAddress = change.owner.AddressOwner;
+    } else if (change.owner?.ObjectOwner) {
+      ownerAddress = change.owner.ObjectOwner;
+    } else if (typeof change.owner === 'string') {
+      ownerAddress = change.owner;
+    }
+
     return {
       coinType: change.coinType,
       coinSymbol,
       amount: amount / Math.pow(10, decimals),
       rawAmount: amount,
-      owner: change.owner?.AddressOwner || change.owner?.ObjectOwner || change.owner
+      owner: ownerAddress
     };
   });
 
@@ -306,6 +316,18 @@ function formatTransaction(tx) {
   // Parse object changes with full details
   const parsedObjectChanges = objectChanges.map(change => {
     const objectTypeParts = (change.objectType || '').split('::');
+
+    // Extract owner address safely - only return strings
+    let ownerAddress = null;
+    if (change.owner?.AddressOwner) {
+      ownerAddress = change.owner.AddressOwner;
+    } else if (change.owner?.ObjectOwner) {
+      ownerAddress = change.owner.ObjectOwner;
+    } else if (typeof change.owner === 'string') {
+      ownerAddress = change.owner;
+    }
+    // For Shared, Immutable objects, ownerAddress will remain null
+
     return {
       type: change.type,
       objectType: change.objectType,
@@ -315,7 +337,7 @@ function formatTransaction(tx) {
       objectId: change.objectId,
       version: change.version,
       digest: change.digest,
-      owner: change.owner?.AddressOwner || change.owner?.ObjectOwner || change.owner
+      owner: ownerAddress
     };
   });
 
@@ -332,10 +354,11 @@ function formatTransaction(tx) {
   // Extract checkpoint
   const checkpoint = tx.checkpoint || 'Unknown';
 
-  // Get recipients from object changes
+  // Get recipients from object changes (only string addresses)
   const recipients = new Set();
   parsedObjectChanges.forEach(change => {
-    if (change.owner && change.owner !== sender) {
+    // Only add if owner is a string address (not an object like { Shared: {...} })
+    if (change.owner && typeof change.owner === 'string' && change.owner !== sender) {
       recipients.add(change.owner);
     }
   });
