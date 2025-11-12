@@ -187,53 +187,134 @@ function createTransactionElement(tx, isNew = false) {
 
     const timeAgo = getTimeAgo(new Date(tx.timestamp));
 
-    // Build details HTML - simplified for regular users
-    let detailsHTML = '';
-    if (tx.details && tx.details.length > 0) {
-        detailsHTML = '<div class="activity-details">';
-        tx.details.forEach(detail => {
-            detailsHTML += `<div class="detail-row">✓ ${detail}</div>`;
-        });
-        detailsHTML += '</div>';
+    // Build sender/recipient section
+    let participantsHTML = '';
+    if (tx.sender) {
+        participantsHTML = '<div class="participants-section">';
+        participantsHTML += `<div class="participant-row"><span class="participant-label">From:</span><code class="address-code">${shortenAddress(tx.sender)}</code></div>`;
+        if (tx.recipients && tx.recipients.length > 0) {
+            tx.recipients.forEach(recipient => {
+                participantsHTML += `<div class="participant-row"><span class="participant-label">To:</span><code class="address-code">${shortenAddress(recipient)}</code></div>`;
+            });
+        }
+        participantsHTML += '</div>';
     }
 
-    // Build balance changes HTML - only show if multiple tokens involved
+    // Build function calls section
+    let functionsHTML = '';
+    if (tx.functionCalls && tx.functionCalls.length > 0) {
+        functionsHTML = '<div class="functions-section"><div class="section-title">📦 Functions Called:</div>';
+        tx.functionCalls.forEach((call, idx) => {
+            if (call.package) {
+                const pkgShort = shortenAddress(call.package);
+                functionsHTML += `<div class="function-call">
+                    <div class="function-name">${call.module}::${call.function}</div>
+                    <div class="function-package">Package: ${pkgShort}</div>
+                </div>`;
+            } else if (call.type) {
+                functionsHTML += `<div class="function-call"><div class="function-name">${call.type}</div></div>`;
+            }
+        });
+        functionsHTML += '</div>';
+    }
+
+    // Build balance changes HTML - show ALL balance changes
     let balanceChangesHTML = '';
-    if (tx.balanceChanges && tx.balanceChanges.length > 1) {
-        balanceChangesHTML = '<div class="balance-changes"><div class="balance-changes-title">💰 All Tokens:</div><div class="tokens-grid">';
+    if (tx.balanceChanges && tx.balanceChanges.length > 0) {
+        balanceChangesHTML = '<div class="balance-changes"><div class="section-title">💰 Balance Changes:</div><div class="tokens-grid">';
         tx.balanceChanges.forEach(change => {
             const changeClass = change.amount > 0 ? 'positive' : 'negative';
             const changePrefix = change.amount > 0 ? '+' : '';
-            const changeSymbol = change.amount > 0 ? '📈' : '📉';
-            balanceChangesHTML += `<div class="balance-change ${changeClass}">${changeSymbol} ${changePrefix}${Math.abs(change.amount).toFixed(4)} ${change.coinSymbol}</div>`;
+            const changeSymbol = change.amount > 0 ? '↗' : '↘';
+            balanceChangesHTML += `<div class="balance-change ${changeClass}">
+                <span class="change-symbol">${changeSymbol}</span>
+                <span class="change-amount">${changePrefix}${Math.abs(change.amount).toFixed(6)} ${change.coinSymbol}</span>
+                ${change.owner ? `<span class="change-owner">${shortenAddress(change.owner)}</span>` : ''}
+            </div>`;
         });
         balanceChangesHTML += '</div></div>';
     }
 
-    // Simplified blockchain info - hide technical details unless needed
-    let blockchainInfoHTML = '';
-    if (tx.events && tx.events.length > 0 || (tx.objectChanges && tx.objectChanges.length > 0)) {
-        blockchainInfoHTML = '<div class="blockchain-info">';
+    // Build events section with full details
+    let eventsHTML = '';
+    if (tx.events && tx.events.length > 0) {
+        eventsHTML = '<div class="events-section"><div class="section-title">⚡ Events Emitted (${tx.events.length}):</div>';
+        tx.events.forEach((event, idx) => {
+            const eventData = JSON.stringify(event.data || {}, null, 2);
+            const hasData = event.data && Object.keys(event.data).length > 0;
+            eventsHTML += `<div class="event-item">
+                <div class="event-header">
+                    <span class="event-name">${event.name || event.module}</span>
+                    <span class="event-module">${event.module ? `${event.module}` : ''}</span>
+                </div>
+                ${hasData ? `<div class="event-data"><pre>${eventData}</pre></div>` : ''}
+            </div>`;
+        });
+        eventsHTML += '</div>';
+    }
 
-        if (tx.events && tx.events.length > 0) {
-            blockchainInfoHTML += `<span class="info-badge">⚡ ${tx.events.length} blockchain action${tx.events.length > 1 ? 's' : ''}</span>`;
-        }
+    // Build object changes section with full details
+    let objectChangesHTML = '';
+    if (tx.objectChanges && tx.objectChanges.length > 0) {
+        objectChangesHTML = '<div class="objects-section"><div class="section-title">📦 Object Changes (${tx.objectChanges.length}):</div>';
+        tx.objectChanges.forEach((obj, idx) => {
+            const typeClass = obj.type === 'created' ? 'created' : obj.type === 'mutated' ? 'mutated' : 'deleted';
+            const typeIcon = obj.type === 'created' ? '✨' : obj.type === 'mutated' ? '🔄' : '🗑️';
+            objectChangesHTML += `<div class="object-item">
+                <div class="object-header">
+                    <span class="object-badge ${typeClass}">${typeIcon} ${obj.type}</span>
+                    <span class="object-type">${obj.objectTypeName || 'Object'}</span>
+                </div>
+                <div class="object-details">
+                    <div class="object-detail-row">
+                        <span class="detail-label">ID:</span>
+                        <code class="object-id">${shortenAddress(obj.objectId)}</code>
+                    </div>
+                    ${obj.owner ? `<div class="object-detail-row">
+                        <span class="detail-label">Owner:</span>
+                        <code class="object-id">${shortenAddress(obj.owner)}</code>
+                    </div>` : ''}
+                    ${obj.version ? `<div class="object-detail-row">
+                        <span class="detail-label">Version:</span>
+                        <span>${obj.version}</span>
+                    </div>` : ''}
+                </div>
+            </div>`;
+        });
+        objectChangesHTML += '</div>';
+    }
 
-        if (tx.objectChanges && tx.objectChanges.length > 0) {
-            const created = tx.objectChanges.filter(c => c.type === 'created').length;
-            const mutated = tx.objectChanges.filter(c => c.type === 'mutated').length;
-
-            if (created > 0) blockchainInfoHTML += `<span class="info-badge green">✨ ${created} new</span>`;
-            if (mutated > 0) blockchainInfoHTML += `<span class="info-badge blue">🔄 ${mutated} updated</span>`;
-        }
-
-        blockchainInfoHTML += '</div>';
+    // Build gas details section
+    let gasDetailsHTML = '';
+    if (tx.gasSummary) {
+        gasDetailsHTML = `<div class="gas-details-section">
+            <div class="section-title">⛽ Gas Details:</div>
+            <div class="gas-grid">
+                <div class="gas-item">
+                    <span class="gas-label">Computation:</span>
+                    <span class="gas-value">${tx.gasSummary.computationCost.toFixed(6)} SUI</span>
+                </div>
+                <div class="gas-item">
+                    <span class="gas-label">Storage:</span>
+                    <span class="gas-value">${tx.gasSummary.storageCost.toFixed(6)} SUI</span>
+                </div>
+                <div class="gas-item">
+                    <span class="gas-label">Storage Rebate:</span>
+                    <span class="gas-value">-${tx.gasSummary.storageRebate.toFixed(6)} SUI</span>
+                </div>
+                <div class="gas-item total">
+                    <span class="gas-label">Total Gas:</span>
+                    <span class="gas-value">${tx.gasSummary.totalGas.toFixed(6)} SUI</span>
+                </div>
+            </div>
+        </div>`;
     }
 
     div.innerHTML = `
         <div class="transaction-header">
             <div class="transaction-type">
                 <span class="type-badge ${typeClass}">${tx.type}</span>
+                ${tx.checkpoint ? `<span class="checkpoint-badge">Checkpoint: ${tx.checkpoint}</span>` : ''}
             </div>
             <div class="transaction-amount ${amountClass}">
                 ${tx.amount > 0 ? `${amountPrefix}${tx.amount.toFixed(4)} ${tx.coinType}` : ''}
@@ -244,31 +325,37 @@ function createTransactionElement(tx, isNew = false) {
             ${tx.description || 'Wallet activity'}
         </div>
 
-        ${detailsHTML}
+        ${participantsHTML}
+        ${functionsHTML}
         ${balanceChangesHTML}
-        ${blockchainInfoHTML}
+        ${eventsHTML}
+        ${objectChangesHTML}
+        ${gasDetailsHTML}
 
         <div class="transaction-footer">
-            <div class="footer-row">
+            <div class="footer-info">
                 <div class="footer-item">
                     <span class="footer-icon">🕐</span>
                     <span class="footer-text">${timeAgo}</span>
                 </div>
                 <div class="footer-item">
-                    <span class="footer-icon">${tx.status === 'success' ? '✓' : '✗'}</span>
-                    <span class="footer-text">${tx.status === 'success' ? 'Done' : 'Failed'}</span>
+                    <span class="footer-icon">${tx.status === 'success' ? '✅' : '❌'}</span>
+                    <span class="footer-text">${tx.status === 'success' ? 'Success' : 'Failed'}</span>
                 </div>
-                ${tx.gasUsed.computationCost ? `
+                ${tx.transactionKind ? `
                 <div class="footer-item">
-                    <span class="footer-icon">⛽</span>
-                    <span class="footer-text">${(parseInt(tx.gasUsed.computationCost) / 1000000000).toFixed(4)} SUI fee</span>
+                    <span class="footer-icon">📋</span>
+                    <span class="footer-text">${tx.transactionKind}</span>
                 </div>
                 ` : ''}
             </div>
-            <div class="view-link-container">
-                <a href="https://suivision.xyz/txblock/${tx.digest}" target="_blank" class="view-link" title="View full transaction details">
-                    View Details →
+            <div class="footer-links">
+                <a href="https://suivision.xyz/txblock/${tx.digest}" target="_blank" class="view-link" title="View on SuiVision">
+                    View on Explorer →
                 </a>
+                <button class="copy-btn" onclick="copyToClipboard('${tx.digest}')" title="Copy transaction hash">
+                    📋 Copy Hash
+                </button>
             </div>
         </div>
     `;
@@ -416,6 +503,16 @@ function getTimeAgo(date) {
     if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
 
     return date.toLocaleDateString();
+}
+
+// Copy to clipboard function
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Transaction hash copied!');
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        showToast('Failed to copy');
+    });
 }
 
 // Update time ago every minute

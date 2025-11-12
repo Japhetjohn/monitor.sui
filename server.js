@@ -220,10 +220,60 @@ function formatTransaction(tx) {
   const transaction = tx.transaction || {};
   const timestamp = tx.timestampMs ? new Date(parseInt(tx.timestampMs)) : new Date();
 
+  // Extract sender
+  const sender = transaction.data?.sender || 'Unknown';
+
+  // Extract transaction type and details
+  const txKind = transaction.data?.transaction?.kind || 'Unknown';
+  let functionCalls = [];
+  let inputs = [];
+
+  if (txKind === 'ProgrammableTransaction') {
+    const txData = transaction.data.transaction;
+    const transactions = txData.transactions || [];
+
+    // Parse function calls
+    transactions.forEach((tx, idx) => {
+      if (tx.MoveCall) {
+        const moveCall = tx.MoveCall;
+        functionCalls.push({
+          package: moveCall.package,
+          module: moveCall.module,
+          function: moveCall.function,
+          arguments: moveCall.arguments || []
+        });
+      }
+      if (tx.TransferObjects) {
+        functionCalls.push({
+          type: 'TransferObjects',
+          objects: tx.TransferObjects[0] || [],
+          to: tx.TransferObjects[1] || null
+        });
+      }
+      if (tx.SplitCoins) {
+        functionCalls.push({
+          type: 'SplitCoins',
+          coin: tx.SplitCoins[0],
+          amounts: tx.SplitCoins[1] || []
+        });
+      }
+      if (tx.MergeCoins) {
+        functionCalls.push({
+          type: 'MergeCoins',
+          destination: tx.MergeCoins[0],
+          sources: tx.MergeCoins[1] || []
+        });
+      }
+    });
+
+    // Parse inputs
+    inputs = txData.inputs || [];
+  }
+
   // Detect activity type from transaction data
   const activity = detectActivityType(tx, balanceChanges, events, objectChanges, transaction);
 
-  // Parse all balance changes
+  // Parse all balance changes with details
   const parsedBalanceChanges = balanceChanges.map(change => {
     const amount = parseFloat(change.amount || 0);
     const coinParts = (change.coinType || '').split('::');
@@ -235,26 +285,60 @@ function formatTransaction(tx) {
       coinSymbol,
       amount: amount / Math.pow(10, decimals),
       rawAmount: amount,
-      owner: change.owner
+      owner: change.owner?.AddressOwner || change.owner?.ObjectOwner || change.owner
     };
   });
 
-  // Parse events for detailed activity info
-  const parsedEvents = events.map(event => ({
-    type: event.type,
-    sender: event.sender,
-    data: event.parsedJson || event.bcs
-  }));
+  // Parse events with full details
+  const parsedEvents = events.map(event => {
+    const eventParts = event.type.split('::');
+    return {
+      type: event.type,
+      package: eventParts[0],
+      module: eventParts[1],
+      name: eventParts[2] || eventParts[1],
+      sender: event.sender,
+      data: event.parsedJson || event.bcs,
+      timestampMs: event.timestampMs
+    };
+  });
 
-  // Parse object changes
-  const parsedObjectChanges = objectChanges.map(change => ({
-    type: change.type,
-    objectType: change.objectType,
-    objectId: change.objectId,
-    version: change.version,
-    digest: change.digest,
-    owner: change.owner
-  }));
+  // Parse object changes with full details
+  const parsedObjectChanges = objectChanges.map(change => {
+    const objectTypeParts = (change.objectType || '').split('::');
+    return {
+      type: change.type,
+      objectType: change.objectType,
+      objectTypeName: objectTypeParts[objectTypeParts.length - 1] || 'Unknown',
+      package: objectTypeParts[0],
+      module: objectTypeParts[1],
+      objectId: change.objectId,
+      version: change.version,
+      digest: change.digest,
+      owner: change.owner?.AddressOwner || change.owner?.ObjectOwner || change.owner
+    };
+  });
+
+  // Extract gas details
+  const gasData = effects.gasUsed || {};
+  const gasSummary = {
+    computationCost: gasData.computationCost ? parseInt(gasData.computationCost) / 1000000000 : 0,
+    storageCost: gasData.storageCost ? parseInt(gasData.storageCost) / 1000000000 : 0,
+    storageRebate: gasData.storageRebate ? parseInt(gasData.storageRebate) / 1000000000 : 0,
+    totalGas: 0
+  };
+  gasSummary.totalGas = gasSummary.computationCost + gasSummary.storageCost - gasSummary.storageRebate;
+
+  // Extract checkpoint
+  const checkpoint = tx.checkpoint || 'Unknown';
+
+  // Get recipients from object changes
+  const recipients = new Set();
+  parsedObjectChanges.forEach(change => {
+    if (change.owner && change.owner !== sender) {
+      recipients.add(change.owner);
+    }
+  });
 
   return {
     digest: tx.digest,
@@ -264,12 +348,29 @@ function formatTransaction(tx) {
     amount: activity.amount,
     coinType: activity.coinType,
     details: activity.details,
+
+    // Additional detailed info
+    sender,
+    recipients: Array.from(recipients),
+    checkpoint,
     timestamp: timestamp.toISOString(),
     status: effects.status?.status || 'unknown',
-    gasUsed: effects.gasUsed || {},
+
+    // Transaction specifics
+    transactionKind: txKind,
+    functionCalls,
+    inputs,
+
+    // Gas details
+    gasUsed: gasData,
+    gasSummary,
+
+    // Full parsed data
     balanceChanges: parsedBalanceChanges,
     events: parsedEvents,
     objectChanges: parsedObjectChanges,
+
+    // Raw data for advanced users
     rawTransaction: transaction
   };
 }
