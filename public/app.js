@@ -96,6 +96,10 @@ function handleWebSocketMessage(message) {
                 walletAddress.textContent = shortenAddress(message.address);
                 walletAddress.title = message.address;
             }
+
+            if (!message.data || message.data.length === 0) {
+                console.log('ℹ️ No transactions found for this wallet yet');
+            }
             break;
 
         case 'history':
@@ -109,6 +113,26 @@ function handleWebSocketMessage(message) {
         case 'new_transaction':
             hideLoading();
             handleNewTransaction(message.data);
+            break;
+
+        case 'error':
+            hideLoading();
+            console.error('❌ Server error:', message.message);
+            showToast('Error: ' + message.message);
+            updateStatus('error', 'Error');
+
+            // Show error in empty state
+            const emptyStateElement = document.getElementById('emptyState');
+            emptyStateElement.classList.remove('hidden');
+            emptyStateElement.innerHTML = `
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <p style="color: #ef4444;">${message.message}</p>
+                <p style="font-size: 14px; margin-top: 10px;">Please provide a valid Sui wallet address (0x...)</p>
+            `;
             break;
 
         default:

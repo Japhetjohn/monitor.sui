@@ -23,11 +23,10 @@ const MAX_HISTORY = 50;
 // Resolve SuiNS name to address
 async function resolveSuiNSName(name) {
   try {
-    // @pawtato-land likely resolves to a specific address
-    // For now, we'll use a direct address query approach
     const nameWithoutAt = name.replace('@', '');
+    console.log('🔍 Attempting to resolve SuiNS name:', nameWithoutAt);
 
-    // SuiNS resolution via RPC
+    // Method 1: Try suix_resolveNameServiceAddress
     const response = await fetch(SUI_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -40,9 +39,38 @@ async function resolveSuiNSName(name) {
     });
 
     const data = await response.json();
-    return data.result;
+
+    if (data.result) {
+      console.log('✅ Resolved address:', data.result);
+      return data.result;
+    }
+
+    // Method 2: Try with .sui suffix
+    const withSuffix = nameWithoutAt.endsWith('.sui') ? nameWithoutAt : `${nameWithoutAt}.sui`;
+    console.log('🔍 Trying with .sui suffix:', withSuffix);
+
+    const response2 = await fetch(SUI_RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'suix_resolveNameServiceAddress',
+        params: [withSuffix]
+      })
+    });
+
+    const data2 = await response2.json();
+
+    if (data2.result) {
+      console.log('✅ Resolved address with .sui:', data2.result);
+      return data2.result;
+    }
+
+    console.log('⚠️ Could not resolve SuiNS name, will try as direct address');
+    return null;
   } catch (error) {
-    console.error('Error resolving SuiNS name:', error);
+    console.error('❌ Error resolving SuiNS name:', error);
     return null;
   }
 }
@@ -50,6 +78,8 @@ async function resolveSuiNSName(name) {
 // Get transactions for an address
 async function getTransactions(address, cursor = null, limit = 10) {
   try {
+    console.log(`📡 Fetching transactions for address: ${address.substring(0, 10)}...`);
+
     const response = await fetch(SUI_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -78,9 +108,21 @@ async function getTransactions(address, cursor = null, limit = 10) {
     });
 
     const data = await response.json();
+
+    if (data.error) {
+      console.error('❌ RPC Error:', data.error);
+      return null;
+    }
+
+    if (data.result && data.result.data) {
+      console.log(`✅ Found ${data.result.data.length} transactions`);
+    } else {
+      console.log('⚠️ No transactions found or unexpected response format');
+    }
+
     return data.result;
   } catch (error) {
-    console.error('Error fetching transactions:', error);
+    console.error('❌ Error fetching transactions:', error);
     return null;
   }
 }
@@ -254,18 +296,37 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'start_monitoring') {
         let address = data.address;
+        console.log('📨 Received monitoring request for:', address);
 
         // If it starts with @, resolve it
         if (address.startsWith('@')) {
+          console.log('🔄 Attempting to resolve SuiNS name...');
           const resolved = await resolveSuiNSName(address);
           if (resolved) {
             address = resolved;
+            console.log('✅ Resolved to:', address);
+          } else {
+            console.log('❌ Could not resolve SuiNS name');
+            ws.send(JSON.stringify({
+              type: 'error',
+              message: `Could not resolve SuiNS name: ${address}. Please provide a valid Sui address (0x...).`
+            }));
+            return;
           }
         }
 
-        monitoringAddress = address;
+        // Validate address format
+        if (!address.startsWith('0x') || address.length < 60) {
+          console.log('❌ Invalid address format:', address);
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Invalid Sui address format. Address should start with 0x and be 66 characters long.'
+          }));
+          return;
+        }
 
-        console.log('Starting monitoring for:', address);
+        monitoringAddress = address;
+        console.log('🎯 Starting monitoring for:', address);
 
         // Initial fetch
         const result = await getTransactions(address, null, 20);
@@ -275,9 +336,18 @@ wss.on('connection', (ws) => {
             lastCheckedTx = result.data[0].digest;
           }
 
+          console.log(`📊 Sending ${transactionHistory.length} transactions to client`);
+
           ws.send(JSON.stringify({
             type: 'initial_load',
             data: transactionHistory,
+            address: address
+          }));
+        } else {
+          console.log('⚠️ No transactions found for this address');
+          ws.send(JSON.stringify({
+            type: 'initial_load',
+            data: [],
             address: address
           }));
         }
@@ -292,7 +362,11 @@ wss.on('connection', (ws) => {
         }, 5000); // Check every 5 seconds
       }
     } catch (error) {
-      console.error('WebSocket message error:', error);
+      console.error('❌ WebSocket message error:', error);
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'An error occurred while processing your request.'
+      }));
     }
   });
 
