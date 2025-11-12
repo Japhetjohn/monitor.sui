@@ -171,52 +171,114 @@ function handleNewTransaction(tx) {
     showNotification(tx);
 
     // Show toast
-    showToast(`New ${tx.type.toLowerCase()}: ${tx.amount} ${tx.coinType}`);
+    showToast(`New ${tx.type}: ${tx.description}`);
 }
 
-// Create transaction element
+// Create transaction element with comprehensive details
 function createTransactionElement(tx, isNew = false) {
     const div = document.createElement('div');
     div.className = `transaction-card${isNew ? ' new' : ''}`;
     div.id = `tx-${tx.digest}`;
 
-    const typeClass = tx.type.toLowerCase();
-    const isPositive = tx.type === 'Received';
-    const amountPrefix = isPositive ? '+' : '-';
+    const typeClass = tx.category || tx.type.toLowerCase().replace(/\s+/g, '_');
+    const isPositive = tx.type === 'Received' || tx.category === 'transfer_in';
+    const amountPrefix = isPositive ? '+' : (tx.amount > 0 ? '-' : '');
     const amountClass = isPositive ? 'positive' : 'negative';
 
     const timeAgo = getTimeAgo(new Date(tx.timestamp));
+
+    // Build details HTML
+    let detailsHTML = '';
+    if (tx.details && tx.details.length > 0) {
+        detailsHTML = '<div class="activity-details"><ul class="details-list">';
+        tx.details.forEach(detail => {
+            detailsHTML += `<li>${detail}</li>`;
+        });
+        detailsHTML += '</ul></div>';
+    }
+
+    // Build balance changes HTML
+    let balanceChangesHTML = '';
+    if (tx.balanceChanges && tx.balanceChanges.length > 1) {
+        balanceChangesHTML = '<div class="balance-changes"><div class="balance-changes-title">All Balance Changes:</div>';
+        tx.balanceChanges.forEach(change => {
+            const changeClass = change.amount > 0 ? 'positive' : 'negative';
+            const changePrefix = change.amount > 0 ? '+' : '';
+            balanceChangesHTML += `<div class="balance-change ${changeClass}">${changePrefix}${change.amount.toFixed(6)} ${change.coinSymbol}</div>`;
+        });
+        balanceChangesHTML += '</div>';
+    }
+
+    // Build events HTML
+    let eventsHTML = '';
+    if (tx.events && tx.events.length > 0) {
+        eventsHTML = `<div class="events-section"><div class="events-title">Events (${tx.events.length}):</div><div class="events-list">`;
+        tx.events.slice(0, 3).forEach(event => {
+            const eventName = event.type.split('::').pop();
+            eventsHTML += `<span class="event-tag">${eventName}</span>`;
+        });
+        if (tx.events.length > 3) {
+            eventsHTML += `<span class="event-tag">+${tx.events.length - 3} more</span>`;
+        }
+        eventsHTML += '</div></div>';
+    }
+
+    // Build object changes HTML
+    let objectChangesHTML = '';
+    if (tx.objectChanges && tx.objectChanges.length > 0) {
+        const created = tx.objectChanges.filter(c => c.type === 'created').length;
+        const mutated = tx.objectChanges.filter(c => c.type === 'mutated').length;
+        const deleted = tx.objectChanges.filter(c => c.type === 'deleted').length;
+
+        objectChangesHTML = '<div class="object-changes">';
+        if (created) objectChangesHTML += `<span class="obj-badge created">${created} Created</span>`;
+        if (mutated) objectChangesHTML += `<span class="obj-badge mutated">${mutated} Modified</span>`;
+        if (deleted) objectChangesHTML += `<span class="obj-badge deleted">${deleted} Deleted</span>`;
+        objectChangesHTML += '</div>';
+    }
 
     div.innerHTML = `
         <div class="transaction-header">
             <div class="transaction-type">
                 <span class="type-badge ${typeClass}">${tx.type}</span>
+                ${tx.category ? `<span class="category-badge">${tx.category.replace(/_/g, ' ')}</span>` : ''}
             </div>
             <div class="transaction-amount ${amountClass}">
-                ${amountPrefix}${tx.amount.toFixed(4)} ${tx.coinType}
+                ${tx.amount > 0 ? `${amountPrefix}${tx.amount.toFixed(4)} ${tx.coinType}` : ''}
             </div>
         </div>
 
-        <div class="transaction-details">
-            <div class="detail-item">
-                <span class="detail-label">Time</span>
-                <span class="detail-value">${timeAgo}</span>
+        <div class="transaction-description">
+            ${tx.description || 'Blockchain transaction'}
+        </div>
+
+        ${detailsHTML}
+        ${balanceChangesHTML}
+        ${objectChangesHTML}
+        ${eventsHTML}
+
+        <div class="transaction-meta">
+            <div class="meta-row">
+                <div class="detail-item">
+                    <span class="detail-label">⏰ Time</span>
+                    <span class="detail-value">${timeAgo}</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">📊 Status</span>
+                    <span class="detail-value status-${tx.status}">${tx.status}</span>
+                </div>
+                ${tx.gasUsed.computationCost ? `
+                <div class="detail-item">
+                    <span class="detail-label">⛽ Gas</span>
+                    <span class="detail-value">${(parseInt(tx.gasUsed.computationCost) / 1000000000).toFixed(6)} SUI</span>
+                </div>
+                ` : ''}
             </div>
-            <div class="detail-item">
-                <span class="detail-label">Status</span>
-                <span class="detail-value">${tx.status}</span>
-            </div>
-            ${tx.gasUsed.computationCost ? `
-            <div class="detail-item">
-                <span class="detail-label">Gas Used</span>
-                <span class="detail-value">${(parseInt(tx.gasUsed.computationCost) / 1000000000).toFixed(6)} SUI</span>
-            </div>
-            ` : ''}
         </div>
 
         <div class="transaction-hash">
             <a href="https://suivision.xyz/txblock/${tx.digest}" target="_blank" class="hash-link" title="${tx.digest}">
-                View on SuiVision: ${shortenHash(tx.digest)}
+                🔗 View on SuiVision: ${shortenHash(tx.digest)}
             </a>
         </div>
     `;
@@ -283,9 +345,10 @@ function showNotification(tx) {
         return;
     }
 
-    const title = `${tx.type}: ${tx.amount} ${tx.coinType}`;
+    const title = `${tx.type}: ${tx.coinType}`;
+    const bodyText = tx.description || `Activity on ${WALLET_ADDRESS}`;
     const options = {
-        body: `Transaction on ${WALLET_ADDRESS}`,
+        body: bodyText,
         icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="%236366f1"/></svg>',
         badge: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="%236366f1"/></svg>',
         tag: tx.digest,

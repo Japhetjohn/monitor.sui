@@ -75,12 +75,13 @@ async function resolveSuiNSName(name) {
   }
 }
 
-// Get transactions for an address
+// Get transactions for an address (both sent and received)
 async function getTransactions(address, cursor = null, limit = 10) {
   try {
     console.log(`📡 Fetching transactions for address: ${address.substring(0, 10)}...`);
 
-    const response = await fetch(SUI_RPC_URL, {
+    // Query transactions from this address
+    const fromResponse = await fetch(SUI_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -90,7 +91,7 @@ async function getTransactions(address, cursor = null, limit = 10) {
         params: [
           {
             filter: {
-              FromOrToAddress: address
+              FromAddress: address
             },
             options: {
               showInput: true,
@@ -100,27 +101,79 @@ async function getTransactions(address, cursor = null, limit = 10) {
               showBalanceChanges: true
             }
           },
-          cursor,
+          null,
           limit,
           true // descending order
         ]
       })
     });
 
-    const data = await response.json();
+    // Query transactions to this address
+    const toResponse = await fetch(SUI_RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'suix_queryTransactionBlocks',
+        params: [
+          {
+            filter: {
+              ToAddress: address
+            },
+            options: {
+              showInput: true,
+              showEffects: true,
+              showEvents: true,
+              showObjectChanges: true,
+              showBalanceChanges: true
+            }
+          },
+          null,
+          limit,
+          true // descending order
+        ]
+      })
+    });
 
-    if (data.error) {
-      console.error('❌ RPC Error:', data.error);
+    const fromData = await fromResponse.json();
+    const toData = await toResponse.json();
+
+    if (fromData.error && toData.error) {
+      console.error('❌ RPC Errors:', { from: fromData.error, to: toData.error });
       return null;
     }
 
-    if (data.result && data.result.data) {
-      console.log(`✅ Found ${data.result.data.length} transactions`);
-    } else {
-      console.log('⚠️ No transactions found or unexpected response format');
-    }
+    // Combine and deduplicate transactions
+    const fromTxs = fromData.result?.data || [];
+    const toTxs = toData.result?.data || [];
 
-    return data.result;
+    console.log(`✅ Found ${fromTxs.length} sent and ${toTxs.length} received transactions`);
+
+    // Merge and deduplicate by digest
+    const txMap = new Map();
+    [...fromTxs, ...toTxs].forEach(tx => {
+      if (!txMap.has(tx.digest)) {
+        txMap.set(tx.digest, tx);
+      }
+    });
+
+    // Sort by timestamp (most recent first)
+    const allTxs = Array.from(txMap.values()).sort((a, b) => {
+      const timeA = parseInt(a.timestampMs || 0);
+      const timeB = parseInt(b.timestampMs || 0);
+      return timeB - timeA;
+    });
+
+    const result = {
+      data: allTxs.slice(0, limit),
+      hasNextPage: allTxs.length > limit,
+      nextCursor: allTxs.length > limit ? allTxs[limit].digest : null
+    };
+
+    console.log(`📊 Returning ${result.data.length} total unique transactions`);
+
+    return result;
   } catch (error) {
     console.error('❌ Error fetching transactions:', error);
     return null;
@@ -158,36 +211,327 @@ async function getTransactionDetails(digest) {
   }
 }
 
-// Parse and format transaction data
+// Parse and format transaction data with comprehensive activity detection
 function formatTransaction(tx) {
   const balanceChanges = tx.balanceChanges || [];
   const effects = tx.effects || {};
+  const events = tx.events || [];
+  const objectChanges = tx.objectChanges || [];
+  const transaction = tx.transaction || {};
   const timestamp = tx.timestampMs ? new Date(parseInt(tx.timestampMs)) : new Date();
 
-  let type = 'Transaction';
-  let amount = 0;
-  let coinType = 'SUI';
+  // Detect activity type from transaction data
+  const activity = detectActivityType(tx, balanceChanges, events, objectChanges, transaction);
 
-  // Determine transaction type and amount
-  if (balanceChanges.length > 0) {
-    const change = balanceChanges[0];
-    amount = Math.abs(parseInt(change.amount || 0)) / 1000000000; // Convert MIST to SUI
-    coinType = change.coinType?.split('::').pop() || 'SUI';
-    type = parseInt(change.amount || 0) > 0 ? 'Received' : 'Sent';
-  }
+  // Parse all balance changes
+  const parsedBalanceChanges = balanceChanges.map(change => {
+    const amount = parseFloat(change.amount || 0);
+    const coinParts = (change.coinType || '').split('::');
+    const coinSymbol = coinParts[coinParts.length - 1] || 'UNKNOWN';
+    const decimals = getCoinDecimals(coinSymbol);
+
+    return {
+      coinType: change.coinType,
+      coinSymbol,
+      amount: amount / Math.pow(10, decimals),
+      rawAmount: amount,
+      owner: change.owner
+    };
+  });
+
+  // Parse events for detailed activity info
+  const parsedEvents = events.map(event => ({
+    type: event.type,
+    sender: event.sender,
+    data: event.parsedJson || event.bcs
+  }));
+
+  // Parse object changes
+  const parsedObjectChanges = objectChanges.map(change => ({
+    type: change.type,
+    objectType: change.objectType,
+    objectId: change.objectId,
+    version: change.version,
+    digest: change.digest,
+    owner: change.owner
+  }));
 
   return {
     digest: tx.digest,
-    type,
-    amount,
-    coinType,
+    type: activity.type,
+    category: activity.category,
+    description: activity.description,
+    amount: activity.amount,
+    coinType: activity.coinType,
+    details: activity.details,
     timestamp: timestamp.toISOString(),
     status: effects.status?.status || 'unknown',
     gasUsed: effects.gasUsed || {},
-    balanceChanges,
-    events: tx.events || [],
-    objectChanges: tx.objectChanges || []
+    balanceChanges: parsedBalanceChanges,
+    events: parsedEvents,
+    objectChanges: parsedObjectChanges,
+    rawTransaction: transaction
   };
+}
+
+// Detect specific activity type from transaction data
+function detectActivityType(tx, balanceChanges, events, objectChanges, transaction) {
+  let type = 'Transaction';
+  let category = 'other';
+  let description = 'Blockchain interaction';
+  let amount = 0;
+  let coinType = 'SUI';
+  let details = [];
+
+  // Check for NFT activities
+  const nftActivity = detectNFTActivity(events, objectChanges);
+  if (nftActivity.detected) {
+    return nftActivity;
+  }
+
+  // Check for DEX swap
+  const swapActivity = detectSwapActivity(events, balanceChanges);
+  if (swapActivity.detected) {
+    return swapActivity;
+  }
+
+  // Check for staking/unstaking
+  const stakingActivity = detectStakingActivity(events, transaction);
+  if (stakingActivity.detected) {
+    return stakingActivity;
+  }
+
+  // Check for simple token transfers
+  if (balanceChanges.length > 0) {
+    const netChanges = {};
+
+    balanceChanges.forEach(change => {
+      const coinParts = (change.coinType || '').split('::');
+      const coinSymbol = coinParts[coinParts.length - 1] || 'UNKNOWN';
+      const decimals = getCoinDecimals(coinSymbol);
+      const amount = parseFloat(change.amount || 0) / Math.pow(10, decimals);
+
+      if (!netChanges[coinSymbol]) {
+        netChanges[coinSymbol] = 0;
+      }
+      netChanges[coinSymbol] += amount;
+    });
+
+    // Determine if sent or received
+    const mainCoin = Object.keys(netChanges)[0];
+    const mainAmount = netChanges[mainCoin];
+
+    if (mainAmount > 0) {
+      type = 'Received';
+      category = 'transfer_in';
+      description = `Received ${Math.abs(mainAmount).toFixed(6)} ${mainCoin}`;
+      amount = Math.abs(mainAmount);
+      coinType = mainCoin;
+      details.push(`Incoming transfer of ${mainCoin}`);
+    } else if (mainAmount < 0) {
+      type = 'Sent';
+      category = 'transfer_out';
+      description = `Sent ${Math.abs(mainAmount).toFixed(6)} ${mainCoin}`;
+      amount = Math.abs(mainAmount);
+      coinType = mainCoin;
+      details.push(`Outgoing transfer of ${mainCoin}`);
+    }
+
+    // Add all balance changes to details
+    Object.entries(netChanges).forEach(([coin, amt]) => {
+      if (amt !== 0) {
+        details.push(`${amt > 0 ? '+' : ''}${amt.toFixed(6)} ${coin}`);
+      }
+    });
+  }
+
+  // Check for contract interactions
+  if (transaction.data && transaction.data.transaction) {
+    const txData = transaction.data.transaction;
+    if (txData.kind === 'ProgrammableTransaction') {
+      type = 'Contract Call';
+      category = 'contract';
+      const commands = txData.transactions || [];
+      description = `Smart contract interaction (${commands.length} commands)`;
+      details.push(`Programmable transaction with ${commands.length} operations`);
+    }
+  }
+
+  // Add event information
+  if (events.length > 0) {
+    details.push(`${events.length} event(s) emitted`);
+    events.forEach(event => {
+      const eventType = event.type.split('::').pop();
+      details.push(`Event: ${eventType}`);
+    });
+  }
+
+  // Add object changes
+  if (objectChanges.length > 0) {
+    const created = objectChanges.filter(c => c.type === 'created').length;
+    const mutated = objectChanges.filter(c => c.type === 'mutated').length;
+    const deleted = objectChanges.filter(c => c.type === 'deleted').length;
+
+    if (created) details.push(`${created} object(s) created`);
+    if (mutated) details.push(`${mutated} object(s) modified`);
+    if (deleted) details.push(`${deleted} object(s) deleted`);
+  }
+
+  return {
+    detected: true,
+    type,
+    category,
+    description,
+    amount,
+    coinType,
+    details
+  };
+}
+
+// Detect NFT minting, transfer, or sale
+function detectNFTActivity(events, objectChanges) {
+  const nftKeywords = ['nft', 'mint', 'collection', 'token', 'kiosk', 'display'];
+
+  // Check events for NFT activities
+  for (const event of events) {
+    const eventType = event.type.toLowerCase();
+    if (nftKeywords.some(keyword => eventType.includes(keyword))) {
+      const created = objectChanges.filter(c => c.type === 'created').length;
+
+      if (eventType.includes('mint')) {
+        return {
+          detected: true,
+          type: 'NFT Mint',
+          category: 'nft_mint',
+          description: 'Minted new NFT',
+          amount: created,
+          coinType: 'NFT',
+          details: ['NFT minting transaction', `Created ${created} object(s)`]
+        };
+      }
+
+      if (eventType.includes('transfer')) {
+        return {
+          detected: true,
+          type: 'NFT Transfer',
+          category: 'nft_transfer',
+          description: 'NFT transferred',
+          amount: 1,
+          coinType: 'NFT',
+          details: ['NFT transfer transaction']
+        };
+      }
+    }
+  }
+
+  // Check object changes for NFT creation
+  const hasDisplay = objectChanges.some(c =>
+    c.objectType && c.objectType.toLowerCase().includes('display')
+  );
+
+  if (hasDisplay) {
+    return {
+      detected: true,
+      type: 'NFT Activity',
+      category: 'nft',
+      description: 'NFT-related activity',
+      amount: 0,
+      coinType: 'NFT',
+      details: ['NFT object interaction']
+    };
+  }
+
+  return { detected: false };
+}
+
+// Detect DEX swap activities
+function detectSwapActivity(events, balanceChanges) {
+  const swapKeywords = ['swap', 'trade', 'exchange', 'pool', 'cetus', 'turbos', 'deepbook'];
+
+  for (const event of events) {
+    const eventType = event.type.toLowerCase();
+    if (swapKeywords.some(keyword => eventType.includes(keyword))) {
+      // Parse swap details from balance changes
+      if (balanceChanges.length >= 2) {
+        const incoming = balanceChanges.find(c => parseFloat(c.amount) > 0);
+        const outgoing = balanceChanges.find(c => parseFloat(c.amount) < 0);
+
+        if (incoming && outgoing) {
+          const inCoin = incoming.coinType.split('::').pop();
+          const outCoin = outgoing.coinType.split('::').pop();
+          const inAmount = Math.abs(parseFloat(incoming.amount)) / getCoinDecimalsDivisor(inCoin);
+          const outAmount = Math.abs(parseFloat(outgoing.amount)) / getCoinDecimalsDivisor(outCoin);
+
+          return {
+            detected: true,
+            type: 'Swap',
+            category: 'dex_swap',
+            description: `Swapped ${outAmount.toFixed(4)} ${outCoin} for ${inAmount.toFixed(4)} ${inCoin}`,
+            amount: outAmount,
+            coinType: outCoin,
+            details: [
+              `Sold: ${outAmount.toFixed(6)} ${outCoin}`,
+              `Received: ${inAmount.toFixed(6)} ${inCoin}`,
+              'DEX trade executed'
+            ]
+          };
+        }
+      }
+    }
+  }
+
+  return { detected: false };
+}
+
+// Detect staking activities
+function detectStakingActivity(events, transaction) {
+  const stakingKeywords = ['stake', 'delegate', 'validator', 'unstake', 'withdraw_stake'];
+
+  for (const event of events) {
+    const eventType = event.type.toLowerCase();
+    if (stakingKeywords.some(keyword => eventType.includes(keyword))) {
+      if (eventType.includes('unstake') || eventType.includes('withdraw')) {
+        return {
+          detected: true,
+          type: 'Unstake',
+          category: 'staking',
+          description: 'Unstaked SUI from validator',
+          amount: 0,
+          coinType: 'SUI',
+          details: ['Unstaking transaction', 'Withdrew staked SUI']
+        };
+      } else {
+        return {
+          detected: true,
+          type: 'Stake',
+          category: 'staking',
+          description: 'Staked SUI with validator',
+          amount: 0,
+          coinType: 'SUI',
+          details: ['Staking transaction', 'Delegated SUI to validator']
+        };
+      }
+    }
+  }
+
+  return { detected: false };
+}
+
+// Get coin decimals
+function getCoinDecimals(coinSymbol) {
+  const decimalsMap = {
+    'SUI': 9,
+    'USDC': 6,
+    'USDT': 6,
+    'WETH': 8,
+    'CETUS': 9
+  };
+  return decimalsMap[coinSymbol] || 9;
+}
+
+// Get coin decimals divisor
+function getCoinDecimalsDivisor(coinSymbol) {
+  return Math.pow(10, getCoinDecimals(coinSymbol));
 }
 
 // Monitor wallet for new transactions

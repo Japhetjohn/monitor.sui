@@ -350,6 +350,35 @@ body {
     border: 1px solid var(--warning);
 }
 
+.type-badge.swap,
+.type-badge.dex_swap {
+    background: rgba(139, 92, 246, 0.2);
+    color: var(--secondary);
+    border: 1px solid var(--secondary);
+}
+
+.type-badge.nft_mint,
+.type-badge.nft_transfer,
+.type-badge.nft {
+    background: rgba(236, 72, 153, 0.2);
+    color: #ec4899;
+    border: 1px solid #ec4899;
+}
+
+.type-badge.staking,
+.type-badge.stake,
+.type-badge.unstake {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+    border: 1px solid #22c55e;
+}
+
+.type-badge.contract {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+    border: 1px solid #3b82f6;
+}
+
 .transaction-amount {
     font-size: 20px;
     font-weight: 700;
@@ -554,5 +583,213 @@ body {
     }
     100% {
         transform: translateX(100%);
+    }
+}
+
+/* New comprehensive activity styles */
+.category-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    font-size: 10px;
+    margin-left: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.transaction-description {
+    margin: 15px 0;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    font-size: 15px;
+    color: var(--text-primary);
+    font-weight: 500;
+    border-left: 3px solid var(--primary);
+}
+
+.activity-details {
+    margin: 15px 0;
+}
+
+.details-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.details-list li {
+    padding: 6px 12px;
+    margin: 4px 0;
+    background: rgba(99, 102, 241, 0.05);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    border-left: 2px solid var(--primary);
+}
+
+.details-list li:before {
+    content: "▹ ";
+    color: var(--primary);
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+.balance-changes {
+    margin: 15px 0;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+}
+
+.balance-changes-title {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.balance-change {
+    display: inline-block;
+    padding: 4px 10px;
+    margin: 4px 4px 4px 0;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'Monaco', monospace;
+}
+
+.balance-change.positive {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.balance-change.negative {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+
+.events-section {
+    margin: 15px 0;
+    padding: 12px;
+    background: rgba(139, 92, 246, 0.05);
+    border-radius: 8px;
+}
+
+.events-title {
+    font-size: 12px;
+    color: var(--secondary);
+    font-weight: 600;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.events-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.event-tag {
+    display: inline-block;
+    padding: 4px 10px;
+    background: rgba(139, 92, 246, 0.15);
+    color: var(--secondary);
+    border: 1px solid var(--secondary);
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.object-changes {
+    margin: 15px 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.obj-badge {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.obj-badge.created {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+    border: 1px solid #22c55e;
+}
+
+.obj-badge.mutated {
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--warning);
+    border: 1px solid var(--warning);
+}
+
+.obj-badge.deleted {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+
+.transaction-meta {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border);
+}
+
+.meta-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.status-success {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.status-failure {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+/* Category-specific card styling */
+.transaction-card.new {
+    animation: highlight 2s ease-out, slideIn 0.4s ease-out;
+}
+
+/* Enhanced responsive */
+@media (max-width: 768px) {
+    .balance-change {
+        font-size: 11px;
+        padding: 3px 8px;
+    }
+
+    .event-tag {
+        font-size: 10px;
+        padding: 3px 8px;
+    }
+
+    .transaction-description {
+        font-size: 14px;
+    }
+
+    .details-list li {
+        font-size: 12px;
+    }
+
+    .meta-row {
+        grid-template-columns: 1fr;
     }
 }
