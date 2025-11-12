@@ -276,9 +276,9 @@ function formatTransaction(tx) {
 
 // Detect specific activity type from transaction data
 function detectActivityType(tx, balanceChanges, events, objectChanges, transaction) {
-  let type = 'Transaction';
+  let type = 'Activity';
   let category = 'other';
-  let description = 'Blockchain interaction';
+  let description = 'Wallet activity';
   let amount = 0;
   let coinType = 'SUI';
   let details = [];
@@ -322,59 +322,63 @@ function detectActivityType(tx, balanceChanges, events, objectChanges, transacti
     const mainAmount = netChanges[mainCoin];
 
     if (mainAmount > 0) {
-      type = 'Received';
+      type = '💰 Money In';
       category = 'transfer_in';
-      description = `Received ${Math.abs(mainAmount).toFixed(6)} ${mainCoin}`;
+      description = `Got ${Math.abs(mainAmount).toFixed(4)} ${mainCoin}`;
       amount = Math.abs(mainAmount);
       coinType = mainCoin;
-      details.push(`Incoming transfer of ${mainCoin}`);
-    } else if (mainAmount < 0) {
-      type = 'Sent';
-      category = 'transfer_out';
-      description = `Sent ${Math.abs(mainAmount).toFixed(6)} ${mainCoin}`;
-      amount = Math.abs(mainAmount);
-      coinType = mainCoin;
-      details.push(`Outgoing transfer of ${mainCoin}`);
-    }
 
-    // Add all balance changes to details
-    Object.entries(netChanges).forEach(([coin, amt]) => {
-      if (amt !== 0) {
-        details.push(`${amt > 0 ? '+' : ''}${amt.toFixed(6)} ${coin}`);
+      // Simple details
+      if (Object.keys(netChanges).length === 1) {
+        details.push(`You received ${Math.abs(mainAmount).toFixed(4)} ${mainCoin}`);
+      } else {
+        details.push(`Multiple tokens received`);
+        Object.entries(netChanges).forEach(([coin, amt]) => {
+          if (amt > 0) {
+            details.push(`+ ${amt.toFixed(4)} ${coin}`);
+          }
+        });
       }
-    });
+    } else if (mainAmount < 0) {
+      type = '💸 Money Out';
+      category = 'transfer_out';
+      description = `Sent ${Math.abs(mainAmount).toFixed(4)} ${mainCoin}`;
+      amount = Math.abs(mainAmount);
+      coinType = mainCoin;
+
+      // Simple details
+      if (Object.keys(netChanges).length === 1) {
+        details.push(`You sent ${Math.abs(mainAmount).toFixed(4)} ${mainCoin}`);
+      } else {
+        details.push(`Multiple tokens sent`);
+        Object.entries(netChanges).forEach(([coin, amt]) => {
+          if (amt < 0) {
+            details.push(`- ${Math.abs(amt).toFixed(4)} ${coin}`);
+          }
+        });
+      }
+    }
   }
 
   // Check for contract interactions
   if (transaction.data && transaction.data.transaction) {
     const txData = transaction.data.transaction;
     if (txData.kind === 'ProgrammableTransaction') {
-      type = 'Contract Call';
+      type = '⚙️ Smart Action';
       category = 'contract';
       const commands = txData.transactions || [];
-      description = `Smart contract interaction (${commands.length} commands)`;
-      details.push(`Programmable transaction with ${commands.length} operations`);
+      description = `Used a DApp or smart contract`;
+      details.push(`Performed ${commands.length} action(s) on the blockchain`);
     }
   }
 
-  // Add event information
-  if (events.length > 0) {
-    details.push(`${events.length} event(s) emitted`);
-    events.forEach(event => {
-      const eventType = event.type.split('::').pop();
-      details.push(`Event: ${eventType}`);
-    });
-  }
-
-  // Add object changes
+  // Add simple summaries instead of technical details
   if (objectChanges.length > 0) {
     const created = objectChanges.filter(c => c.type === 'created').length;
     const mutated = objectChanges.filter(c => c.type === 'mutated').length;
-    const deleted = objectChanges.filter(c => c.type === 'deleted').length;
 
-    if (created) details.push(`${created} object(s) created`);
-    if (mutated) details.push(`${mutated} object(s) modified`);
-    if (deleted) details.push(`${deleted} object(s) deleted`);
+    if (created > 0) details.push(`Created ${created} new item(s)`);
+    if (mutated > 0) details.push(`Updated ${mutated} item(s)`);
   }
 
   return {
@@ -401,24 +405,24 @@ function detectNFTActivity(events, objectChanges) {
       if (eventType.includes('mint')) {
         return {
           detected: true,
-          type: 'NFT Mint',
+          type: '🎨 NFT Minted',
           category: 'nft_mint',
-          description: 'Minted new NFT',
+          description: 'Created a new NFT',
           amount: created,
           coinType: 'NFT',
-          details: ['NFT minting transaction', `Created ${created} object(s)`]
+          details: ['You minted a new digital collectible', created > 0 ? `${created} item(s) created` : 'NFT created']
         };
       }
 
       if (eventType.includes('transfer')) {
         return {
           detected: true,
-          type: 'NFT Transfer',
+          type: '🖼️ NFT Moved',
           category: 'nft_transfer',
-          description: 'NFT transferred',
+          description: 'Transferred an NFT',
           amount: 1,
           coinType: 'NFT',
-          details: ['NFT transfer transaction']
+          details: ['You moved a digital collectible']
         };
       }
     }
@@ -432,12 +436,12 @@ function detectNFTActivity(events, objectChanges) {
   if (hasDisplay) {
     return {
       detected: true,
-      type: 'NFT Activity',
+      type: '🎨 NFT Activity',
       category: 'nft',
-      description: 'NFT-related activity',
+      description: 'Did something with an NFT',
       amount: 0,
       coinType: 'NFT',
-      details: ['NFT object interaction']
+      details: ['Interacted with a digital collectible']
     };
   }
 
@@ -464,15 +468,15 @@ function detectSwapActivity(events, balanceChanges) {
 
           return {
             detected: true,
-            type: 'Swap',
+            type: '🔄 Token Swap',
             category: 'dex_swap',
-            description: `Swapped ${outAmount.toFixed(4)} ${outCoin} for ${inAmount.toFixed(4)} ${inCoin}`,
+            description: `Traded ${outAmount.toFixed(2)} ${outCoin} for ${inAmount.toFixed(2)} ${inCoin}`,
             amount: outAmount,
             coinType: outCoin,
             details: [
-              `Sold: ${outAmount.toFixed(6)} ${outCoin}`,
-              `Received: ${inAmount.toFixed(6)} ${inCoin}`,
-              'DEX trade executed'
+              `You gave: ${outAmount.toFixed(4)} ${outCoin}`,
+              `You got: ${inAmount.toFixed(4)} ${inCoin}`,
+              'Exchanged on a trading platform'
             ]
           };
         }
@@ -493,22 +497,22 @@ function detectStakingActivity(events, transaction) {
       if (eventType.includes('unstake') || eventType.includes('withdraw')) {
         return {
           detected: true,
-          type: 'Unstake',
+          type: '🔓 Unstaked',
           category: 'staking',
-          description: 'Unstaked SUI from validator',
+          description: 'Withdrew staked coins',
           amount: 0,
           coinType: 'SUI',
-          details: ['Unstaking transaction', 'Withdrew staked SUI']
+          details: ['You took your coins out of staking', 'Coins are now available to use']
         };
       } else {
         return {
           detected: true,
-          type: 'Stake',
+          type: '🔒 Staked',
           category: 'staking',
-          description: 'Staked SUI with validator',
+          description: 'Locked coins to earn rewards',
           amount: 0,
           coinType: 'SUI',
-          details: ['Staking transaction', 'Delegated SUI to validator']
+          details: ['You staked coins to earn interest', 'Coins are locked with a validator']
         };
       }
     }
