@@ -484,6 +484,10 @@ function hideLoading() {
 
 // Utility functions
 function shortenAddress(address) {
+    // Handle null, undefined, or non-string values
+    if (!address || typeof address !== 'string') {
+        return 'N/A';
+    }
     if (address.startsWith('@')) return address;
     if (address.length <= 16) return address;
     return `${address.substring(0, 8)}...${address.substring(address.length - 6)}`;
