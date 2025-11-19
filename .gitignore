@@ -3,6 +3,31 @@ node_modules/
 package-lock.json
 yarn.lock
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
 # Environment variables
 .env
 .env.local
@@ -20,6 +45,9 @@ pids
 *.pid
 *.seed
 *.pid.lock
+
+# Bot data
+monitored_wallets.json
 
 # Coverage directory
 coverage/
